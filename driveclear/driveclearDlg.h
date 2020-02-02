@@ -37,6 +37,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg void OnClose(); 
 	afx_msg HCURSOR OnQueryDragIcon();
+	afx_msg BOOL OnDeviceChange(UINT nEventType, DWORD_PTR dwData);
 	DECLARE_MESSAGE_MAP()
 	afx_msg void OnCbnSelchangeCombo1();
 	afx_msg void OnBnClickedButton1();

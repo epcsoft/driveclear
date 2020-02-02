@@ -90,6 +90,7 @@ BEGIN_MESSAGE_MAP(CdriveclearDlg, CDialog)
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
 	ON_WM_CLOSE()
+	ON_WM_DEVICECHANGE()
 	//}}AFX_MSG_MAP
 	ON_CBN_SELCHANGE(IDC_COMBO1, &CdriveclearDlg::OnCbnSelchangeCombo1)
 	//ON_BN_CLICKED(IDCANCEL, &CdriveclearDlg::OnBnClickedCancel)
@@ -252,6 +253,15 @@ HCURSOR CdriveclearDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
+BOOL CdriveclearDlg::OnDeviceChange(UINT nEventType, DWORD_PTR dwData)
+{
+	if (!isdoing)
+	{
+		refreshdskinfo();
+	}
+	return CDialog::OnDeviceChange(nEventType, dwData);
+}
+
 void randomBuff(char* buffer,int len)
 {
 	int blocksize = 23333;
@@ -349,7 +359,7 @@ void WINAPI erasing (PVOID pParam)
 		{
 			spacecanuse = 0;
 		}
-		wsprintf(txtbuf,_T("%d MB"),spacecanuse/1024/1024);
+		sprintf(txtbuf,"%llu MB",spacecanuse/1024/1024);
 		dlg->SetDlgItemText(IDC_EDIT3,txtbuf);
 		dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)((tmp-spacecanuse)*100/tmp),0);
 		GetSystemTime(&sys);
@@ -414,7 +424,7 @@ void WINAPI erasing (PVOID pParam)
 				if (memcmp(sm3hash, vecSM3Hash[r].sm3hash, 32) != 0)
 				{
 					nErrcount++;
-					sprintf(txtbuf, "检测到%d个错误，位置：%d MB", nErrcount,r*BUFFERLEN / 1024 / 1024);
+					sprintf(txtbuf, "检测到%d个错误，位置：%llu MB", nErrcount,(ULONGLONG)r*BUFFERLEN / 1024 / 1024);
 					dlg->appendInfo(txtbuf);
 					if(nErrcount>10)
 					{
@@ -427,7 +437,7 @@ void WINAPI erasing (PVOID pParam)
 				{
 					validSpace += vecSM3Hash[r].len;
 				}
-				wsprintf(txtbuf, _T("%d MB"), r*BUFFERLEN / 1024 / 1024);
+				sprintf(txtbuf,"%llu MB", (tmp-(ULONGLONG)r*BUFFERLEN) / 1024 / 1024);
 				dlg->SetDlgItemText(IDC_EDIT3, txtbuf);
 				dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)(r* 100 / vecSM3Hash.size()), 0);
 				GetSystemTime(&sys);
@@ -512,10 +522,18 @@ void CdriveclearDlg::OnBnClickedStart()
 {
 	// TODO: 在此添加控件通知处理程序代码
 	unsigned long ThreadID;
-	if(!isdoing){
-	getdiskinfo(localdrive);
-	SetDlgItemText(IDC_EDIT5, "");
-	CloseHandle(CreateThread(NULL,NULL,(LPTHREAD_START_ROUTINE)erasing,this,0,&ThreadID));
+	if(!isdoing)
+	{
+		getdiskinfo(localdrive);
+		CString fsys;
+		GetDlgItemText(IDC_EDIT1, fsys);
+		if (strstr(fsys.GetBuffer(),"FAT32") !=NULL&&spacecanuse>4000000000)
+		{
+			MessageBox("FAT32文件系统只能检测4G容量，超出部分无法检测，建议转为NTFS或者ExFat后再试！", "警告", MB_OK | MB_ICONWARNING);
+			return;
+		}
+		SetDlgItemText(IDC_EDIT5, "");
+		CloseHandle(CreateThread(NULL,NULL,(LPTHREAD_START_ROUTINE)erasing,this,0,&ThreadID));
 	}
 	else {
 		CWnd   *pWnd;  
