@@ -51,7 +51,10 @@
 #endif // _AFX_NO_AFXCMN_SUPPORT
 
 
-
+#include "strsafe.h"
+#include "mmsystem.h"
+#include <vector>
+#include <string>
 
 
 

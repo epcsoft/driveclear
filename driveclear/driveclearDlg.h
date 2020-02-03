@@ -9,6 +9,11 @@ struct  GM_SM3Hash
 	int len;
 	unsigned char sm3hash[32];
 };
+struct	GM_TestFile
+{
+	CString filename;
+	std::vector<GM_SM3Hash> vecSM3Hash;
+};
 // CdriveclearDlg 对话框
 class CdriveclearDlg : public CDialog
 {
@@ -20,6 +25,7 @@ public:
 	enum { IDD = IDD_DRIVECLEAR_DIALOG };
 	void noticemain(LPCTSTR shengyu,LPCTSTR sudu,long dangqian,long zonggong);
 	void appendInfo(const char* str);
+	ULONGLONG getDiskSpaceRemain(const char *path);
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 支持
 	void showInfo();

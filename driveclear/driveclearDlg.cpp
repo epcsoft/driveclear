@@ -4,9 +4,6 @@
 #include "stdafx.h"
 #include "driveclear.h"
 #include "driveclearDlg.h"
-#include "strsafe.h"
-#include "mmsystem.h"
-#include <vector>
 #include "SM3Tool.h"
 #define BUFFERLEN 16777216
 bool isdoing=false;
@@ -104,6 +101,35 @@ CString   zxcstr(float   zvalue)
 	zxstr.Format(_T("%.2f MB"),zvalue);   
 	return   zxstr;  
 }   
+
+
+ULONGLONG CdriveclearDlg::getDiskSpaceRemain(const char *path)
+{
+	BOOL flag;
+	ULARGE_INTEGER clu, sec, freeclu;
+	char myvolname[128] = { 0 };
+	char myfilesys[128] = { 0 };
+	char txtbuf[256] = { 0 };
+	char rootPath[MAX_PATH] = {0};
+	strcpy(rootPath,path);
+	rootPath[3] = 0;
+	flag = GetVolumeInformation(rootPath, myvolname, 128, NULL, NULL, NULL, myfilesys, 128);
+	if (flag != 0)
+	{
+		wsprintf(txtbuf, _T("%s, %s"), myvolname, myfilesys);
+		//MessageBox(hwnd,txtbuf,rootpath,MB_OK);
+		SetDlgItemText(IDC_EDIT1, txtbuf);
+		//CEdit *pxl=(CEdit   *)   GetDlgItem(hwnd,IDC_EDIT1);  
+		//pxl->SetWindowText(txtbuf);
+
+		GetDiskFreeSpaceEx(rootPath, (PULARGE_INTEGER)&clu, (PULARGE_INTEGER)&sec, (PULARGE_INTEGER)&freeclu);
+		return freeclu.QuadPart;
+	}
+	return 0;
+}
+
+
+
 void CdriveclearDlg::getdiskinfo(LPCTSTR rootpath)
 {
 	BOOL flag;
@@ -289,24 +315,40 @@ unsigned int getCurrentTime()
 	return current;
 #endif
 }
+
+HANDLE dealFileCreation(std::vector<GM_TestFile>& vecTestFile, CdriveclearDlg *dlg,CString &path,GM_TestFile &singlefile)
+{
+	char txtbuf[MAX_PATH] = {0};
+	sprintf(txtbuf, "temp_%u.tmp", vecTestFile.size());
+	path = localdrive + CString(txtbuf);
+	dlg->appendInfo(CString("创建文件:" + path));
+	HANDLE hfile = CreateFile(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_FLAG_NO_BUFFERING, NULL);
+	if (hfile == INVALID_HANDLE_VALUE)
+	{
+		dlg->appendInfo("无法创建文件,介质只读或没有权限");
+		CloseHandle(hfile);
+		return NULL;
+	}
+	singlefile.filename = path;
+	singlefile.vecSM3Hash.clear();
+	return hfile;
+}
+
 void WINAPI erasing (PVOID pParam) 
 {
-	HANDLE hfile;
+	HANDLE hfile=NULL;
 	ULARGE_INTEGER a1,a2,a3;
 	unsigned long n;
 	SYSTEMTIME sys; 
 	unsigned int nowtime;
 	unsigned int countst,counten;
-	CdriveclearDlg m;
 	CString path=localdrive;
-	ULONGLONG tmp=spacecanuse;
-	ULONGLONG validSpace = 0;
+	ULONGLONG validSpace = spacecanuse;
 	char* buf=new char [BUFFERLEN];
 	char txtbuf[256] = {0};
 	int nErrcount = 0;
 	BOOL userstop=false;
 	CdriveclearDlg *dlg = (CdriveclearDlg*)pParam;
-	path+=_T("temp.tmp");
 	if(spacecanuse<=0)
 	{
 		dlg->appendInfo("剩余0字节...");
@@ -314,17 +356,8 @@ void WINAPI erasing (PVOID pParam)
 		delete[] buf;
 		return;
 	}
-	dlg->appendInfo("创建文件...");
-	hfile=CreateFile(path,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,NULL,NULL);
-	if(hfile==INVALID_HANDLE_VALUE)
-	{
-		dlg->appendInfo("无法创建文件,介质只读或没有权限");
-		CloseHandle(hfile);
-		isdoing=false;
-		delete[] buf;
-		return;
-	}
-	else isdoing=true;
+	isdoing = true;
+
 	dlg->GetDlgItem(IDC_BUTTON2)->EnableWindow(FALSE);
 	dlg->GetDlgItem(IDC_COMBO1)->EnableWindow(FALSE);
 	dlg->m_capcheck.EnableWindow(FALSE);
@@ -332,14 +365,35 @@ void WINAPI erasing (PVOID pParam)
 	dlg->SendDlgItemMessage(IDC_PROGRESS1,PBM_SETRANGE, 0,MAKELPARAM (0,100));
 	GetSystemTime(&sys);
 	nowtime=getCurrentTime();
-	dlg->appendInfo("开始填充...");
-	std::vector<GM_SM3Hash> vecSM3Hash;
+	dlg->appendInfo("准备填充...");
+	std::vector<GM_TestFile> vecTestFile;
+	GM_TestFile singlefile;
 	while(1)
 	{			
+		if (hfile == NULL)
+		{
+			hfile = dealFileCreation(vecTestFile, dlg, path, singlefile);
+			if (hfile == NULL)
+			{
+				isdoing = false;
+				delete[] buf;
+				return;
+			}
+		}
 		randomBuff(buf, BUFFERLEN);
 		countst = getCurrentTime();		
 		if(WriteFile(hfile,buf, BUFFERLEN,&n,NULL)==0 || n!= BUFFERLEN)break;
 		counten = getCurrentTime() - countst;
+		if (validSpace < n)
+		{
+			validSpace = 0;
+		}
+		else
+		{
+			validSpace -= n;
+		}
+		sprintf(txtbuf, "%llu MB", validSpace / 1024 / 1024);
+		dlg->SetDlgItemText(IDC_EDIT3, txtbuf);
 		if(isdoing==false)
 		{
 			dlg->appendInfo("用户终止!");
@@ -352,21 +406,20 @@ void WINAPI erasing (PVOID pParam)
 			SM3Tool sm3;
 			sm3.sm3((unsigned char*)buf, (int)n, sm3hash.sm3hash);
 			sm3hash.len = n;
-			vecSM3Hash.push_back(sm3hash);
+			singlefile.vecSM3Hash.push_back(sm3hash);
 		}
-		spacecanuse-= BUFFERLEN;
-		if (spacecanuse < 0)
+		if (singlefile.vecSM3Hash.size() >=100)
 		{
-			spacecanuse = 0;
+			vecTestFile.push_back(singlefile);
+			CloseHandle(hfile);
+			hfile = NULL;
 		}
-		sprintf(txtbuf,"%llu MB",spacecanuse/1024/1024);
-		dlg->SetDlgItemText(IDC_EDIT3,txtbuf);
-		dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)((tmp-spacecanuse)*100/tmp),0);
 		GetSystemTime(&sys);
 		unsigned int delta = getCurrentTime() - nowtime;
 		if(delta>1000)
 		{
 			nowtime = getCurrentTime();
+			dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)((spacecanuse- validSpace) * 100 / spacecanuse), 0);
 			if(counten==0)
 				sprintf(txtbuf,"-");
 			else
@@ -379,6 +432,16 @@ void WINAPI erasing (PVOID pParam)
 	dlg->appendInfo("收尾...");
 	if(!userstop)
 	{
+		if (hfile == NULL)
+		{
+			hfile = dealFileCreation(vecTestFile, dlg, path, singlefile);
+			if (hfile == NULL)
+			{
+				isdoing = false;
+				delete[] buf;
+				return;
+			}
+		}
 		GetDiskFreeSpaceEx(localdrive,(PULARGE_INTEGER)&a1,(PULARGE_INTEGER)&a2,(PULARGE_INTEGER)&a3);
 		WriteFile(hfile,buf,a3.QuadPart,&n,NULL);
 		if (dlg->m_capcheck.GetCheck() == BST_CHECKED&&n>0)
@@ -387,78 +450,97 @@ void WINAPI erasing (PVOID pParam)
 			SM3Tool sm3;
 			sm3.sm3((unsigned char*)buf, (int)n, sm3hash.sm3hash);
 			sm3hash.len = n;
-			vecSM3Hash.push_back(sm3hash);
+			singlefile.vecSM3Hash.push_back(sm3hash);
 		}
 	}
 	CloseHandle(hfile);
-	if (dlg->m_capcheck.GetCheck() == BST_CHECKED)
+	vecTestFile.push_back(singlefile);
+	if (dlg->m_capcheck.GetCheck() == BST_CHECKED&&!userstop)
 	{
-		dlg->appendInfo("校验数据...");
-		hfile = CreateFile(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, NULL, NULL);
-		if (hfile == INVALID_HANDLE_VALUE)
-		{
-			dlg->appendInfo("无法读取文件,介质损坏！");
-			CloseHandle(hfile);
-		}
-		else
-		{
-			for(int r=0;r<vecSM3Hash.size();r++)
+		
+			for (int i = 0; i < vecTestFile.size(); i++)
 			{
-				countst = getCurrentTime();
-				if (ReadFile(hfile, buf, BUFFERLEN, &n, NULL) == 0)
+				if (userstop)
 				{
-					dlg->appendInfo("读取错误!数据意外终止！");
-					userstop = true;
 					break;
 				}
-				counten = getCurrentTime() - countst;
-				if (isdoing == false)
+				GM_TestFile & testFile = vecTestFile[i];
+				hfile = CreateFile(testFile.filename, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+				if (hfile == INVALID_HANDLE_VALUE)
 				{
-					dlg->appendInfo("用户终止!");
-					userstop = true;
-					break;
-				}
-				unsigned char sm3hash[32] = {0};
-				SM3Tool sm3;
-				sm3.sm3((unsigned char*)buf, (int)n, sm3hash);
-				if (memcmp(sm3hash, vecSM3Hash[r].sm3hash, 32) != 0)
-				{
-					nErrcount++;
-					sprintf(txtbuf, "检测到%d个错误，位置：%llu MB", nErrcount,(ULONGLONG)r*BUFFERLEN / 1024 / 1024);
-					dlg->appendInfo(txtbuf);
-					if(nErrcount>10)
-					{
-						dlg->appendInfo("错误过多，检测中断！");
-						userstop = true;
-						break;
-					}
+					dlg->appendInfo(CString("无法读取文件：" + testFile.filename + ",介质损坏！"));
+					CloseHandle(hfile);
 				}
 				else
 				{
-					validSpace += vecSM3Hash[r].len;
+					dlg->appendInfo(CString("校验文件：" + testFile.filename));
 				}
-				sprintf(txtbuf,"%llu MB", (tmp-(ULONGLONG)r*BUFFERLEN) / 1024 / 1024);
-				dlg->SetDlgItemText(IDC_EDIT3, txtbuf);
-				dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)(r* 100 / vecSM3Hash.size()), 0);
-				GetSystemTime(&sys);
-				unsigned int delta = getCurrentTime() - nowtime;
-				if (delta > 1000)
+				for (int r = 0; r < testFile.vecSM3Hash.size(); r++)
 				{
-					nowtime = getCurrentTime();
-					if (counten == 0)
-						sprintf(txtbuf, "-");
+					countst = getCurrentTime();
+					if (ReadFile(hfile, buf, BUFFERLEN, &n, NULL) == 0)
+					{
+						dlg->appendInfo("读取错误!数据意外终止！");
+						userstop = true;
+						break;
+					}
+					counten = getCurrentTime() - countst;
+					if (isdoing == false)
+					{
+						dlg->appendInfo("用户终止!");
+						userstop = true;
+						break;
+					}
+					unsigned char sm3hash[32] = { 0 };
+					SM3Tool sm3;
+					sm3.sm3((unsigned char*)buf, (int)n, sm3hash);
+					if (memcmp(sm3hash, testFile.vecSM3Hash[r].sm3hash, 32) != 0)
+					{
+						nErrcount++;
+						sprintf(txtbuf, "%s文件检测到%d个错误，位置：%llu MB", testFile.filename.GetBuffer(),nErrcount, (ULONGLONG)r*BUFFERLEN / 1024 / 1024);
+						dlg->appendInfo(txtbuf);
+						if (nErrcount > 10)
+						{
+							dlg->appendInfo("错误过多，检测中断！");
+							userstop = true;
+							break;
+						}
+					}
 					else
 					{
-						sprintf(txtbuf, "%.2f MB/S", (float)BUFFERLEN *1000.0f / (float)counten / 1024.0f / 1024.0f);
+						validSpace += testFile.vecSM3Hash[r].len;
 					}
-					dlg->SetDlgItemText(IDC_EDIT4, txtbuf);
+					sprintf(txtbuf, "%llu MB", (spacecanuse - validSpace) / 1024 / 1024);
+					dlg->SetDlgItemText(IDC_EDIT3, txtbuf);
+					dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)(validSpace * 100 / spacecanuse), 0);
+					GetSystemTime(&sys);
+					unsigned int delta = getCurrentTime() - nowtime;
+					if (delta > 1000)
+					{
+						nowtime = getCurrentTime();
+						if (counten == 0)
+							sprintf(txtbuf, "-");
+						else
+						{
+							sprintf(txtbuf, "%.2f MB/S", (float)BUFFERLEN *1000.0f / (float)counten / 1024.0f / 1024.0f);
+						}
+						dlg->SetDlgItemText(IDC_EDIT4, txtbuf);
+					}
 				}
+				CloseHandle(hfile);
+				hfile = NULL;
 			}
+		if (hfile != NULL)
+		{
+				CloseHandle(hfile);
 		}
 	}
-	CloseHandle(hfile);
+	
 	dlg->appendInfo("清理数据中...");
-	DeleteFile(path);
+	for (int r = 0; r < vecTestFile.size(); r++)
+	{
+		DeleteFile(vecTestFile[r].filename);
+	}
 	isdoing=false;
 	dlg->SendDlgItemMessage(IDC_PROGRESS1, PBM_SETPOS, (WPARAM)(100),0);
 	dlg->SetDlgItemText(IDC_EDIT3,_T("0 MB"));
@@ -486,7 +568,6 @@ void WINAPI erasing (PVOID pParam)
 	dlg->m_capcheck.EnableWindow(TRUE);
 	dlg->GetDlgItem(IDSTART)->EnableWindow(TRUE);
 	dlg->GetDlgItem(IDSTART)->SetWindowText("开始");
-	spacecanuse=tmp;
 	delete[] buf;
 }
 void CdriveclearDlg::OnCbnSelchangeCombo1()
@@ -525,13 +606,6 @@ void CdriveclearDlg::OnBnClickedStart()
 	if(!isdoing)
 	{
 		getdiskinfo(localdrive);
-		CString fsys;
-		GetDlgItemText(IDC_EDIT1, fsys);
-		if (strstr(fsys.GetBuffer(),"FAT32") !=NULL&&spacecanuse>4000000000)
-		{
-			MessageBox("FAT32文件系统只能检测4G容量，超出部分无法检测，建议转为NTFS或者ExFat后再试！", "警告", MB_OK | MB_ICONWARNING);
-			return;
-		}
 		SetDlgItemText(IDC_EDIT5, "");
 		CloseHandle(CreateThread(NULL,NULL,(LPTHREAD_START_ROUTINE)erasing,this,0,&ThreadID));
 	}
