@@ -368,8 +368,8 @@ void WINAPI erasing (PVOID pParam)
 	dlg->appendInfo("准备填充...");
 	std::vector<GM_TestFile> vecTestFile;
 	GM_TestFile singlefile;
-	while(1)
-	{			
+	while (1)
+	{
 		if (hfile == NULL)
 		{
 			hfile = dealFileCreation(vecTestFile, dlg, path, singlefile);
@@ -381,8 +381,34 @@ void WINAPI erasing (PVOID pParam)
 			}
 		}
 		randomBuff(buf, BUFFERLEN);
-		countst = getCurrentTime();		
-		if(WriteFile(hfile,buf, BUFFERLEN,&n,NULL)==0 || n!= BUFFERLEN)break;
+		countst = getCurrentTime();
+		n = 0;
+		if (!WriteFile(hfile, buf, BUFFERLEN, &n, NULL))
+		{
+			if (validSpace < BUFFERLEN)
+			{
+				sprintf(txtbuf, "收尾...%llu KB", validSpace / 1024);
+				dlg->appendInfo(txtbuf);
+				if (!WriteFile(hfile, buf, validSpace, &n, NULL) && n == validSpace)
+				{
+					dlg->appendInfo("收尾失败！请不要操作测试分区！");
+					break;
+				}
+
+			}
+			else
+			{
+				nErrcount++;
+				if (nErrcount > 10)
+				{
+					dlg->appendInfo("错误过多，检测中断！");
+					userstop = true;
+					break;
+				}
+				sprintf(txtbuf, "文件写入错误！位置：%llu MB", validSpace / 1024 / 1024);
+				dlg->appendInfo(txtbuf);
+			}
+		}
 		counten = getCurrentTime() - countst;
 		if (validSpace < n)
 		{
@@ -394,13 +420,13 @@ void WINAPI erasing (PVOID pParam)
 		}
 		sprintf(txtbuf, "%llu MB", validSpace / 1024 / 1024);
 		dlg->SetDlgItemText(IDC_EDIT3, txtbuf);
-		if(isdoing==false)
+		if (isdoing == false)
 		{
 			dlg->appendInfo("用户终止!");
-			userstop=true;
+			userstop = true;
 			break;
 		}
-		if (dlg->m_capcheck.GetCheck() == BST_CHECKED)
+		if (dlg->m_capcheck.GetCheck() == BST_CHECKED&&n > 0)
 		{
 			GM_SM3Hash sm3hash;
 			SM3Tool sm3;
@@ -408,6 +434,16 @@ void WINAPI erasing (PVOID pParam)
 			sm3hash.len = n;
 			singlefile.vecSM3Hash.push_back(sm3hash);
 		}
+		if (n == 0)
+		{
+			if (singlefile.vecSM3Hash.size()> 0)
+			{
+				vecTestFile.push_back(singlefile);
+				CloseHandle(hfile);
+				hfile = NULL;
+			}
+		}
+		else
 		if (singlefile.vecSM3Hash.size() >=100)
 		{
 			vecTestFile.push_back(singlefile);
@@ -427,32 +463,13 @@ void WINAPI erasing (PVOID pParam)
 				sprintf(txtbuf, "%.2f MB/S", (float)BUFFERLEN *1000.0f / (float)counten / 1024.0f / 1024.0f);
 			}
 			dlg->SetDlgItemText(IDC_EDIT4,txtbuf);
-		}		
-	}
-	dlg->appendInfo("收尾...");
-	if(!userstop)
-	{
-		if (hfile == NULL)
+		}	
+		if (validSpace == 0)
 		{
-			hfile = dealFileCreation(vecTestFile, dlg, path, singlefile);
-			if (hfile == NULL)
-			{
-				isdoing = false;
-				delete[] buf;
-				return;
-			}
-		}
-		GetDiskFreeSpaceEx(localdrive,(PULARGE_INTEGER)&a1,(PULARGE_INTEGER)&a2,(PULARGE_INTEGER)&a3);
-		WriteFile(hfile,buf,a3.QuadPart,&n,NULL);
-		if (dlg->m_capcheck.GetCheck() == BST_CHECKED&&n>0)
-		{
-			GM_SM3Hash sm3hash;
-			SM3Tool sm3;
-			sm3.sm3((unsigned char*)buf, (int)n, sm3hash.sm3hash);
-			sm3hash.len = n;
-			singlefile.vecSM3Hash.push_back(sm3hash);
+			break;
 		}
 	}
+
 	CloseHandle(hfile);
 	vecTestFile.push_back(singlefile);
 	if (dlg->m_capcheck.GetCheck() == BST_CHECKED&&!userstop)

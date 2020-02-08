@@ -76,7 +76,7 @@ CAPTION "关于 driveclear"
 FONT 9, "宋体", 0, 0, 0x1
 BEGIN
     ICON            IDR_MAINFRAME,IDC_STATIC,11,17,20,20
-    LTEXT           "driveclear 1.5 版",IDC_STATIC,40,10,119,8,SS_NOPREFIX
+    LTEXT           "driveclear 1.6 版",IDC_STATIC,40,10,119,8,SS_NOPREFIX
     LTEXT           "Copyright EPC SOFT (C) 2009",IDC_STATIC,40,25,119,8
     DEFPUSHBUTTON   "确定",IDOK,178,7,50,16,WS_GROUP
 END
